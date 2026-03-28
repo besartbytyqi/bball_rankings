@@ -1,6 +1,6 @@
 export function playerHeadshotUrl(playerId: number): string {
-  // Try local cached version first (served by FastAPI)
-  return `http://localhost:8000/static/headshots/${playerId}.png`
+  // Relative path works in both dev (proxied to backend) and production (same origin)
+  return `/static/headshots/${playerId}.png`
 }
 
 export function teamLogoUrl(teamId: number): string {
