@@ -14,6 +14,9 @@ const NAV_LINKS = [
   { to: '/', label: 'Dashboard' },
   { to: '/players', label: 'Players' },
   { to: '/teams', label: 'Teams' },
+  { to: '/compare', label: 'Compare' },
+  { to: '/records', label: 'Records' },
+  { to: '/dream-team', label: 'Dream Team' },
 ]
 
 function GlobalSearch() {
