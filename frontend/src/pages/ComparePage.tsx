@@ -71,7 +71,7 @@ function CompareChartLegend({ maxHeight = 56, paddingTop }: { maxHeight?: number
 }
 
 const PLAYER_TAB_COLS = {
-  base: ['gp', 'min', 'pts', 'reb', 'ast', 'stl', 'blk', 'fg_pct', 'fg3_pct', 'ft_pct', 'plus_minus'] as const,
+  base: ['gp', 'min', 'pts', 'pts_per_min', 'reb', 'ast', 'stl', 'blk', 'fg_pct', 'fg3_pct', 'ft_pct', 'plus_minus'] as const,
   advanced: ['gp', 'min', 'ts_pct', 'usg_pct', 'off_rating', 'def_rating', 'net_rating', 'ast_pct', 'oreb_pct', 'dreb_pct', 'reb_pct', 'pie'] as const,
   defense: ['gp', 'min', 'stl', 'blk', 'dreb', 'dreb_pct', 'def_rating', 'opp_pts_paint', 'opp_pts_2nd_chance', 'opp_pts_off_tov', 'def_ws'] as const,
 }
@@ -303,8 +303,12 @@ function PlayerCompare({ p1Id, p2Id }: { p1Id: number; p2Id: number }) {
 
   const base1 = (s1?.base?.[0] ?? {}) as Record<string, number | null>
   const base2 = (s2?.base?.[0] ?? {}) as Record<string, number | null>
-  const rowTab1 = (s1?.[statTab]?.[0] ?? {}) as Record<string, unknown>
-  const rowTab2 = (s2?.[statTab]?.[0] ?? {}) as Record<string, unknown>
+  const addPPM = (r: Record<string, unknown>): Record<string, unknown> => {
+    const pts = Number(r.pts ?? 0); const min = Number(r.min ?? 0)
+    return { ...r, pts_per_min: min > 0 ? pts / min : null }
+  }
+  const rowTab1 = addPPM((s1?.[statTab]?.[0] ?? {}) as Record<string, unknown>)
+  const rowTab2 = addPPM((s2?.[statTab]?.[0] ?? {}) as Record<string, unknown>)
   const name1 = pMeta1?.display_name ?? `Player ${p1Id}`
   const name2 = pMeta2?.display_name ?? `Player ${p2Id}`
   const label1 = compareSeasonLabel(name1, effectiveSeason1)
@@ -464,6 +468,7 @@ function PlayerCompare({ p1Id, p2Id }: { p1Id: number; p2Id: number }) {
               const v1 = Number(rowTab1[k] ?? 0)
               const v2 = Number(rowTab2[k] ?? 0)
               const isPct = k.includes('pct')
+              const decimals = k === 'pts_per_min' ? 3 : 1
               const higherBetter = (a: number, b: number) => {
                 if (statTab === 'defense' && (k === 'def_rating' || k.includes('opp_'))) return a < b
                 return a > b
@@ -477,7 +482,7 @@ function PlayerCompare({ p1Id, p2Id }: { p1Id: number; p2Id: number }) {
                 >
                   <td className="py-1.5 pr-2 text-left tabular-nums">
                     <span className={`font-medium ${higherBetter(v1, v2) ? 'text-nba-gold' : 'text-text-primary'}`}>
-                      {isPct ? fmtPct(v1) : fmtStat(v1)}
+                      {isPct ? fmtPct(v1) : fmtStat(v1, decimals)}
                       {d12 !== '—' ? (
                         <span className="text-text-secondary font-normal text-[0.85em]"> ({d12})</span>
                       ) : null}
@@ -489,7 +494,7 @@ function PlayerCompare({ p1Id, p2Id }: { p1Id: number; p2Id: number }) {
                       {d21 !== '—' ? (
                         <span className="text-text-secondary font-normal text-[0.85em]">({d21}) </span>
                       ) : null}
-                      {isPct ? fmtPct(v2) : fmtStat(v2)}
+                      {isPct ? fmtPct(v2) : fmtStat(v2, decimals)}
                     </span>
                   </td>
                 </tr>

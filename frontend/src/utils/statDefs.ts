@@ -2,6 +2,7 @@ export const STAT_DEFS: Record<string, string> = {
   gp: 'Games Played',
   min: 'Minutes Per Game',
   pts: 'Points Per Game',
+  pts_per_min: 'Points Per Minute',
   reb: 'Total Rebounds Per Game',
   ast: 'Assists Per Game',
   stl: 'Steals Per Game',
