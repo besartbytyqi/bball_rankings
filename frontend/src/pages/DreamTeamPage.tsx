@@ -125,6 +125,51 @@ function decodeRoster(raw: string | null, allPlayers: { player_id: number; displ
     .slice(0, 5)
 }
 
+// Weighted score: pts×3, reb×1.5, ast×1.5, stl×1, blk×1, tov×−2, ts%×2
+function teamScore(t: ProfileAgg): number {
+  return t.pts * 3 + t.reb * 1.5 + t.ast * 1.5 + t.stl + t.blk - t.tov * 2 + t.ts_pct * 200
+}
+
+function WinnerVerdict({
+  totalsA, totalsB, hasA, hasB,
+}: { totalsA: ProfileAgg; totalsB: ProfileAgg; hasA: boolean; hasB: boolean }) {
+  if (!hasA || !hasB) return null
+  const sA = teamScore(totalsA)
+  const sB = teamScore(totalsB)
+  const diff = Math.abs(sA - sB)
+  const total = sA + sB
+  const margin = total > 0 ? diff / total : 0
+
+  const winner = sA > sB ? 'Alpha' : sB > sA ? 'Omega' : null
+  const winnerColor = winner === 'Alpha' ? 'text-[#6b9fff]' : 'text-nba-red'
+  const edge = margin < 0.04 ? 'Extremely close — could go either way' : margin < 0.10 ? 'Slight edge' : margin < 0.20 ? 'Clear advantage' : 'Dominant advantage'
+  const borderColor = winner === 'Alpha' ? 'border-[#17408B]' : winner === 'Omega' ? 'border-nba-red' : 'border-border'
+
+  return (
+    <div className={`mb-6 rounded-xl border-2 ${borderColor} bg-surface-3 px-5 py-4 flex flex-col sm:flex-row items-center justify-between gap-3`}>
+      <div className="flex items-center gap-3">
+        <span className="text-2xl">{winner ? '🏆' : '🤝'}</span>
+        <div>
+          {winner ? (
+            <p className="font-bold text-base">
+              <span className={winnerColor}>Team {winner}</span>
+              <span className="text-text-primary"> wins</span>
+            </p>
+          ) : (
+            <p className="font-bold text-base text-text-primary">It's a tie</p>
+          )}
+          <p className="text-xs text-text-secondary">{edge}</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-4 text-sm font-mono">
+        <span className="text-[#6b9fff] font-bold">{sA.toFixed(1)}</span>
+        <span className="text-text-secondary text-xs">vs</span>
+        <span className="text-nba-red font-bold">{sB.toFixed(1)}</span>
+      </div>
+    </div>
+  )
+}
+
 export default function DreamTeamPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [teamA, setTeamA] = useState<PlayerSlot[]>([])
@@ -361,9 +406,12 @@ export default function DreamTeamPage() {
           <button
             type="button"
             onClick={() => removePlayer(team, p.id)}
-            className="text-text-secondary hover:text-nba-red opacity-0 group-hover:opacity-100 transition-all text-xs shrink-0"
+            title="Remove player"
+            className="shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-text-secondary hover:text-white hover:bg-nba-red transition-colors"
           >
-            Remove
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
           </button>
         </div>
       )
@@ -438,6 +486,7 @@ export default function DreamTeamPage() {
 
       {(teamA.length > 0 || teamB.length > 0) && (
         <div className="bg-surface-2 rounded-xl border border-border p-6">
+          <WinnerVerdict totalsA={totalsA} totalsB={totalsB} hasA={teamA.length > 0} hasB={teamB.length > 0} />
           <h3 className="font-bold mb-4 text-text-secondary uppercase text-xs tracking-widest">Combined Team Comparison</h3>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
