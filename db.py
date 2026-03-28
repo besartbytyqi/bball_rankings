@@ -5,11 +5,12 @@ Database file: nba_stats.db (project root)
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "nba_stats.db"
+DB_PATH = Path(os.environ.get("DATABASE_PATH", str(Path(__file__).parent / "nba_stats.db")))
 
 DDL = """
 PRAGMA journal_mode=WAL;

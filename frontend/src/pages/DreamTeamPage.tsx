@@ -1,14 +1,24 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueries } from '@tanstack/react-query'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, ResponsiveContainer } from 'recharts'
-import { fetchAllPlayers, fetchPlayerCareersBatch } from '@/api/players'
+import { fetchAllPlayers, fetchPlayerCareersBatch, fetchPlayerSeasonAwards } from '@/api/players'
 import { EntitySelector } from '@/components/ui/EntitySelector'
 import { StatHeader } from '@/components/ui/StatHeader'
 import { fmtPct, fmtStat } from '@/utils/formatters'
 import { STAT_DEFS } from '@/utils/statDefs'
 
-type PlayerSlot = { id: number; name: string }
+const AWARD_ICONS: Record<string, string> = {
+  champion: '🏆',
+  fmvp: '🎖️',
+  mvp: '⭐',
+  roy: '🌟',
+  smoy: '✨',
+}
+
+const CURRENT_SEASON = '2025-26'
+
+type PlayerSlot = { id: number; name: string; season: string }
 
 type BestSeasonBy = 'pts' | 'reb' | 'ast' | 'stl' | 'blk' | 'ts_pct' | 'composite'
 
@@ -94,13 +104,34 @@ const CHART_ROWS: { stat: string; colKey: keyof ProfileAgg; scalePct?: boolean }
   { stat: 'TS%', colKey: 'ts_pct', scalePct: true },
 ]
 
+// URL encoding: "id:season" per slot, e.g. "2544:2025-26"
+function encodeRoster(roster: PlayerSlot[]): string {
+  return roster.map((p) => `${p.id}:${p.season}`).join(',')
+}
+
+function decodeRoster(raw: string | null, allPlayers: { player_id: number; display_name: string }[]): PlayerSlot[] {
+  if (!raw) return []
+  return raw
+    .split(',')
+    .map((chunk) => {
+      const colonIdx = chunk.lastIndexOf(':')
+      const id = colonIdx > 0 ? Number(chunk.slice(0, colonIdx)) : Number(chunk)
+      const season = colonIdx > 0 ? chunk.slice(colonIdx + 1) : CURRENT_SEASON
+      if (!Number.isFinite(id) || id <= 0) return null
+      const player = allPlayers.find((p) => p.player_id === id)
+      return { id, name: player?.display_name ?? `Player ${id}`, season }
+    })
+    .filter((s): s is PlayerSlot => s !== null)
+    .slice(0, 5)
+}
+
 export default function DreamTeamPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [teamA, setTeamA] = useState<PlayerSlot[]>([])
   const [teamB, setTeamB] = useState<PlayerSlot[]>([])
-  const [mode, setMode] = useState<'Career Avg' | 'Best Season'>('Career Avg')
-  const [bestBy, setBestBy] = useState<BestSeasonBy>('pts')
   const [chartMotion, setChartMotion] = useState(true)
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -132,55 +163,89 @@ export default function DreamTeamPage() {
     enabled: allIds.length > 0,
   })
 
+  const awardsResults = useQueries({
+    queries: allIds.map((id) => ({
+      queryKey: ['player-season-awards', id],
+      queryFn: () => fetchPlayerSeasonAwards(id),
+      staleTime: 60 * 60 * 1000,
+    })),
+  })
+  const awardsMap = useMemo(() => {
+    const m: Record<number, Record<string, string[]>> = {}
+    allIds.forEach((id, i) => {
+      m[id] = awardsResults[i]?.data?.by_season ?? {}
+    })
+    return m
+  }, [allIds, awardsResults])
+
   useEffect(() => {
-    const modeParam = searchParams.get('mode')
-    const bestParam = searchParams.get('best') as BestSeasonBy | null
-    const parseRoster = (raw: string | null): PlayerSlot[] => {
-      if (!raw) return []
-      return raw
-        .split(',')
-        .map((idStr) => Number(idStr))
-        .filter((id) => Number.isFinite(id) && id > 0)
-        .slice(0, 5)
-        .map((id) => {
-          const player = allPlayers.find((p) => p.player_id === id)
-          return { id, name: player?.display_name ?? `Player ${id}` }
-        })
-    }
-    if (!teamA.length && !teamB.length) {
-      setTeamA(parseRoster(searchParams.get('a')))
-      setTeamB(parseRoster(searchParams.get('b')))
-      if (modeParam === 'best') setMode('Best Season')
-      if (
-        bestParam &&
-        ['pts', 'reb', 'ast', 'stl', 'blk', 'ts_pct', 'composite'].includes(bestParam)
-      ) {
-        setBestBy(bestParam)
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpenDropdown(null)
       }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  // Decode URL params once on mount (allPlayers may be empty yet — names get backfilled below)
+  useEffect(() => {
+    if (!teamA.length && !teamB.length) {
+      setTeamA(decodeRoster(searchParams.get('a'), allPlayers))
+      setTeamB(decodeRoster(searchParams.get('b'), allPlayers))
     }
   }, [searchParams, allPlayers, teamA.length, teamB.length])
 
+  // Backfill names once allPlayers resolves (fixes "Player 12345" fallbacks from URL load)
+  useEffect(() => {
+    if (!allPlayers.length) return
+    const resolve = (slots: PlayerSlot[]) =>
+      slots.map((p) => {
+        if (!p.name.startsWith('Player ')) return p
+        const found = allPlayers.find((pl) => pl.player_id === p.id)
+        return found ? { ...p, name: found.display_name } : p
+      })
+    setTeamA((prev) => resolve(prev))
+    setTeamB((prev) => resolve(prev))
+  }, [allPlayers])
+
   useEffect(() => {
     const next = new URLSearchParams(searchParams)
-    next.set('mode', mode === 'Best Season' ? 'best' : 'career')
-    if (mode === 'Best Season') next.set('best', bestBy)
-    else next.delete('best')
-    if (teamA.length) next.set('a', teamA.map((p) => p.id).join(','))
+    next.delete('mode')
+    next.delete('best')
+    if (teamA.length) next.set('a', encodeRoster(teamA))
     else next.delete('a')
-    if (teamB.length) next.set('b', teamB.map((p) => p.id).join(','))
+    if (teamB.length) next.set('b', encodeRoster(teamB))
     else next.delete('b')
     setSearchParams(next, { replace: true })
-  }, [teamA, teamB, mode, bestBy, searchParams, setSearchParams])
+  }, [teamA, teamB, searchParams, setSearchParams])
 
-  const resolveProfile = (playerId: number): ProfileAgg => {
+  const getPlayerSeasons = (playerId: number): string[] => {
+    const rows = careerMap[playerId] ?? []
+    return rows
+      .map((r) => String(r.season ?? ''))
+      .filter(Boolean)
+      .reverse() // most recent first
+  }
+
+  const getBestSeason = (playerId: number): string => {
     const rows = (careerMap[playerId] ?? []) as Record<string, unknown>[]
-    return buildProfile(rows, mode, bestBy)
+    const best = pickBestRow(rows, 'composite')
+    return String(best.season ?? '')
+  }
+
+  const resolveProfile = (slot: PlayerSlot): ProfileAgg => {
+    const allRows = (careerMap[slot.id] ?? []) as Record<string, unknown>[]
+    const rows = slot.season
+      ? allRows.filter((r) => String(r.season ?? '') === slot.season)
+      : allRows
+    return buildProfile(rows, 'Career Avg', 'composite')
   }
 
   const sumTeam = (roster: PlayerSlot[]): ProfileAgg => {
     const z: ProfileAgg = { pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, tov: 0, ts_pct: 0 }
     for (const p of roster) {
-      const s = resolveProfile(p.id)
+      const s = resolveProfile(p)
       z.pts += s.pts
       z.reb += s.reb
       z.ast += s.ast
@@ -192,8 +257,8 @@ export default function DreamTeamPage() {
     return z
   }
 
-  const totalsA = useMemo(() => sumTeam(teamA), [teamA, careerMap, mode, bestBy])
-  const totalsB = useMemo(() => sumTeam(teamB), [teamB, careerMap, mode, bestBy])
+  const totalsA = useMemo(() => sumTeam(teamA), [teamA, careerMap])
+  const totalsB = useMemo(() => sumTeam(teamB), [teamB, careerMap])
 
   const chartData = CHART_ROWS.map(({ stat, colKey, scalePct }) => ({
     stat,
@@ -209,12 +274,100 @@ export default function DreamTeamPage() {
     if (current.length >= 5) return
     if (current.some((p) => p.id === id)) return
     const fallbackName = allPlayers.find((p) => p.player_id === id)?.display_name ?? `Player ${id}`
-    set([...current, { id, name: name ?? fallbackName }])
+    set([...current, { id, name: name ?? fallbackName, season: CURRENT_SEASON }])
   }
 
   const removePlayer = (team: 'A' | 'B', id: number) => {
     const set = team === 'A' ? setTeamA : setTeamB
     set((prev) => prev.filter((p) => p.id !== id))
+  }
+
+  const setPlayerSeason = (team: 'A' | 'B', id: number, season: string) => {
+    const set = team === 'A' ? setTeamA : setTeamB
+    set((prev) => prev.map((p) => (p.id === id ? { ...p, season } : p)))
+  }
+
+  const renderRoster = (roster: PlayerSlot[], team: 'A' | 'B') => {
+    const hoverBorder = team === 'A' ? 'hover:border-nba-blue' : 'hover:border-nba-red'
+    return roster.map((p) => {
+      const seasons = getPlayerSeasons(p.id)
+      const bestSeason = getBestSeason(p.id)
+      const playerAwards = awardsMap[p.id] ?? {}
+      const dropKey = `${team}-${p.id}`
+      const isOpen = openDropdown === dropKey
+      const seasonIcons = (s: string) =>
+        (playerAwards[s] ?? []).map((tag) => AWARD_ICONS[tag]).filter(Boolean).join('')
+
+      return (
+        <div
+          key={p.id}
+          className={`flex items-center justify-between bg-surface-3 p-3 rounded-lg border border-border/50 group ${hoverBorder} transition-colors gap-3`}
+        >
+          <span className="font-medium text-sm flex-1 min-w-0 truncate">{p.name}</span>
+
+          {seasons.length > 0 ? (
+            <div className="relative shrink-0" ref={isOpen ? dropdownRef : undefined}>
+              <button
+                type="button"
+                onClick={() => setOpenDropdown(isOpen ? null : dropKey)}
+                className="flex items-center gap-1 bg-surface-2 border border-border rounded px-2 py-0.5 text-xs text-text-primary hover:border-border/80 transition-colors"
+              >
+                <span className="font-mono">{p.season}</span>
+                {seasonIcons(p.season) && (
+                  <span className="text-[11px] leading-none">{seasonIcons(p.season)}</span>
+                )}
+                <svg className="w-3 h-3 text-text-secondary ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {isOpen && (
+                <div className="absolute right-0 top-full mt-1 z-50 bg-surface-2 border border-border rounded-lg shadow-xl overflow-hidden min-w-[148px] max-h-64 overflow-y-auto">
+                  {seasons.map((s) => {
+                    const icons = seasonIcons(s)
+                    const isBest = s === bestSeason
+                    const isSelected = s === p.season
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => {
+                          setPlayerSeason(team, p.id, s)
+                          setOpenDropdown(null)
+                        }}
+                        className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 text-xs hover:bg-surface-3 transition-colors ${
+                          isSelected ? 'text-text-primary font-semibold' : 'text-text-secondary'
+                        } ${isBest ? 'bg-amber-950/30' : ''}`}
+                      >
+                        <span className="font-mono">{s}</span>
+                        <span className="flex items-center gap-1 shrink-0">
+                          {icons && <span className="text-[11px] leading-none">{icons}</span>}
+                          {isBest && (
+                            <span className="text-[9px] font-bold uppercase tracking-wide text-amber-400 leading-none">
+                              best
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+            <span className="text-xs text-text-secondary shrink-0 font-mono">{p.season || '—'}</span>
+          )}
+
+          <button
+            type="button"
+            onClick={() => removePlayer(team, p.id)}
+            className="text-text-secondary hover:text-nba-red opacity-0 group-hover:opacity-100 transition-all text-xs shrink-0"
+          >
+            Remove
+          </button>
+        </div>
+      )
+    })
   }
 
   return (
@@ -223,44 +376,24 @@ export default function DreamTeamPage() {
         <div>
           <h1 className="text-2xl font-bold">Dream Team Builder</h1>
           <p className="text-text-secondary text-sm">
-            Build two 5-man rosters and compare combined per-game stats (career weighted averages or each player’s best
-            season by a stat you choose).
+            Build two 5-man rosters and compare combined per-game stats. Pick a season per player — best season is highlighted in the dropdown.
           </p>
         </div>
-        <div className="flex flex-col items-end gap-2">
-          <div className="bg-surface-2 p-1 rounded-lg border border-border flex">
-            {(['Career Avg', 'Best Season'] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setMode(m)}
-                className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-all ${
-                  mode === m ? 'bg-nba-red text-white' : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-          {mode === 'Best Season' ? (
-            <label className="flex items-center gap-2 text-xs text-text-secondary">
-              <span className="shrink-0">Best season by</span>
-              <select
-                value={bestBy}
-                onChange={(e) => setBestBy(e.target.value as BestSeasonBy)}
-                className="bg-surface-3 border border-border rounded px-2 py-1 text-text-primary"
-              >
-                <option value="pts">Points (PTS)</option>
-                <option value="reb">Rebounds (REB)</option>
-                <option value="ast">Assists (AST)</option>
-                <option value="stl">Steals (STL)</option>
-                <option value="blk">Blocks (BLK)</option>
-                <option value="ts_pct">True shooting (TS%)</option>
-                <option value="composite">Composite (PTS+REB+AST+STL+BLK)</option>
-              </select>
-            </label>
-          ) : null}
-        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-secondary">
+        {Object.entries(AWARD_ICONS).map(([tag, icon]) => (
+          <span key={tag} className="flex items-center gap-1">
+            <span>{icon}</span>
+            <span>{{
+              champion: 'Champion',
+              fmvp: 'Finals MVP',
+              mvp: 'MVP',
+              roy: 'Rookie of the Year',
+              smoy: 'Sixth Man',
+            }[tag]}</span>
+          </span>
+        ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -272,21 +405,7 @@ export default function DreamTeamPage() {
           </div>
 
           <div className="space-y-3 min-h-[200px]">
-            {teamA.map((p) => (
-              <div
-                key={p.id}
-                className="flex items-center justify-between bg-surface-3 p-3 rounded-lg border border-border/50 group hover:border-nba-blue transition-colors"
-              >
-                <span className="font-medium text-sm">{p.name}</span>
-                <button
-                  type="button"
-                  onClick={() => removePlayer('A', p.id)}
-                  className="text-text-secondary hover:text-nba-red opacity-0 group-hover:opacity-100 transition-all text-xs"
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
+            {renderRoster(teamA, 'A')}
             {teamA.length === 0 && (
               <p className="text-center py-8 text-text-secondary text-sm italic">No players added yet</p>
             )}
@@ -305,21 +424,7 @@ export default function DreamTeamPage() {
           </div>
 
           <div className="space-y-3 min-h-[200px]">
-            {teamB.map((p) => (
-              <div
-                key={p.id}
-                className="flex items-center justify-between bg-surface-3 p-3 rounded-lg border border-border/50 group hover:border-nba-red transition-colors"
-              >
-                <span className="font-medium text-sm">{p.name}</span>
-                <button
-                  type="button"
-                  onClick={() => removePlayer('B', p.id)}
-                  className="text-text-secondary hover:text-nba-red opacity-0 group-hover:opacity-100 transition-all text-xs"
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
+            {renderRoster(teamB, 'B')}
             {teamB.length === 0 && (
               <p className="text-center py-8 text-text-secondary text-sm italic">No players added yet</p>
             )}

@@ -2,12 +2,14 @@
 main.py — FastAPI application.
 All data logic lives in nba_service.py. This file is thin routing only.
 """
+import os
 from pathlib import Path
 from typing import Optional
 import uuid
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 import db
@@ -15,14 +17,16 @@ import nba_service as svc
 
 app = FastAPI(title="NBA Stats API")
 
+_default_origins = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
+]
+_extra_origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:5174",
-    ],
+    allow_origins=_default_origins + _extra_origins,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
@@ -287,3 +291,20 @@ def player_career(player_id: int):
 def player_season_awards(player_id: int):
     """Season → honor tags from NBA PlayerAwards (MVP, Finals MVP, champion, ROY, Sixth Man)."""
     return {"by_season": svc.get_player_season_awards(player_id)}
+
+
+# ---------------------------------------------------------------------------
+# SPA static file serving — must be last so /api/* routes take precedence
+# ---------------------------------------------------------------------------
+_FRONTEND = Path(__file__).parent / "frontend" / "dist"
+if _FRONTEND.is_dir():
+    _ASSETS = _FRONTEND / "assets"
+    if _ASSETS.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(_ASSETS)), name="frontend-assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        target = _FRONTEND / full_path
+        if target.is_file():
+            return FileResponse(str(target))
+        return FileResponse(str(_FRONTEND / "index.html"))
