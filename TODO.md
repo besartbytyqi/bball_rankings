@@ -4,9 +4,16 @@
 
 **Ops note** — After changing award logic (e.g. Sixth Man), run `python seed.py` so `award_rankings` in SQLite matches the app (or rely on live `_compute_award` fallback when the table is empty for that season).
 
+TO DO
+
+- go through the database and add another calculation and also display it. I want to know stats per minute played. points, rebounds, assists, blocks, etc.
+- can we get how many times a player has been blocked?
+
 ---
 
 ## Completed (shipped)
+
+- In the dream team, I want to pick players by season. default to current season.
 
 ### Player & profile
 
@@ -55,29 +62,29 @@
 
 ## Backlog (optional)
 
-| Area        | Idea |
-|------------|------|
+| Area       | Idea                                                                                  |
+| ---------- | ------------------------------------------------------------------------------------- |
 | Sync       | True incremental/delta sync (high-water marks per table) beyond cache trim + re-seed. |
-| Records    | Exhaustive every NBA Stats export you care about. |
-| Dream Team | Further modes (playoff-only, custom weights). |
-| CI         | Expand test matrix beyond smoke pytest + Vitest. |
+| Records    | Exhaustive every NBA Stats export you care about.                                     |
+| Dream Team | Further modes (playoff-only, custom weights).                                         |
+| CI         | Expand test matrix beyond smoke pytest + Vitest.                                      |
 
 ---
 
 ## Original requests → status (quick map)
 
-| Topic | Status |
-|-------|--------|
-| More YoY stats + chart toggles | **Done** (core + TOV/OREB/DREB; more metrics = backlog). |
-| Game log data / sort | **Done** for sort/display; more columns = backlog. |
-| Acronyms / tooltips everywhere | **Done** on main surfaces; niche pages = backlog. |
-| Load all players + sort | **Done.** |
-| Team sorts (record, etc.) | **Done** (GB, streak, conf rank, PPG). |
-| Esoteric records / catalog | **Done** subset + API catalog; exhaustive = backlog. |
-| Featured players/teams + dashboard + last/next | **Done.** |
-| Refresh “since last update” | **Partial** — quick + full re-seed + metadata; true delta = backlog. |
-| Compare UX + less red | **Done.** |
-| Team multi-season compare + colors | **Done** (`team-career`). |
+| Topic                                          | Status                                                               |
+| ---------------------------------------------- | -------------------------------------------------------------------- |
+| More YoY stats + chart toggles                 | **Done** (core + TOV/OREB/DREB; more metrics = backlog).             |
+| Game log data / sort                           | **Done** for sort/display; more columns = backlog.                   |
+| Acronyms / tooltips everywhere                 | **Done** on main surfaces; niche pages = backlog.                    |
+| Load all players + sort                        | **Done.**                                                            |
+| Team sorts (record, etc.)                      | **Done** (GB, streak, conf rank, PPG).                               |
+| Esoteric records / catalog                     | **Done** subset + API catalog; exhaustive = backlog.                 |
+| Featured players/teams + dashboard + last/next | **Done.**                                                            |
+| Refresh “since last update”                    | **Partial** — quick + full re-seed + metadata; true delta = backlog. |
+| Compare UX + less red                          | **Done.**                                                            |
+| Team multi-season compare + colors             | **Done** (`team-career`).                                            |
 
 ---
 
