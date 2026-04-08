@@ -41,6 +41,11 @@ def startup():
     db.init_db()
 
 
+@app.get("/healthz", include_in_schema=False)
+def healthz():
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------------------
 # Standings & Playoffs
 # ---------------------------------------------------------------------------
