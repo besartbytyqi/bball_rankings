@@ -17,9 +17,15 @@ except Exception:
 EOF
 )
 
+# Start API immediately so platform healthchecks can pass.
+# If first-boot seed is needed, run it in the background.
 if [ "${COUNT:-0}" = "0" ]; then
-    echo "==> First deploy: seeding database (this takes a few minutes)..."
-    python3 seed.py --no-gamelogs
+    echo "==> First deploy: seeding database in background..."
+    (
+        python3 seed.py --no-gamelogs \
+          && echo "==> Seed completed successfully." \
+          || echo "==> Seed failed; check runtime logs."
+    ) &
 fi
 
 exec uvicorn main:app --host 0.0.0.0 --port "${PORT:-8000}"
