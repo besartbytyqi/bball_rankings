@@ -28,5 +28,8 @@ if [ "${COUNT:-0}" = "0" ]; then
     ) &
 fi
 
+echo "==> Checking Python imports..."
+python3 -c "import main; print('==> Imports OK')" 2>&1 || { echo "==> IMPORT FAILED — see above"; exit 1; }
+
 echo "==> Starting uvicorn on port ${PORT:-8000}..."
 exec uvicorn main:app --host 0.0.0.0 --port "${PORT:-8000}" --log-level info
