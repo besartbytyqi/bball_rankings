@@ -99,6 +99,8 @@ type SeasonSelectWithBadgesProps = {
   currentLabel?: string
   /** From GET /players/{id}/season-awards */
   awardsBySeason?: Record<string, string[]>
+  /** Highlight this season with a BEST badge */
+  bestSeason?: string
   disabled?: boolean
   /** compare = sky border accent; profile = default border */
   variant?: 'compare' | 'profile'
@@ -113,6 +115,7 @@ export function SeasonSelectWithBadges({
   showCurrentSeason = true,
   currentLabel = 'Current season (app)',
   awardsBySeason = {},
+  bestSeason,
   disabled = false,
   variant = 'compare',
   'aria-label': ariaLabel = 'Season',
@@ -214,6 +217,7 @@ export function SeasonSelectWithBadges({
           ) : null}
           {seasons.map((s) => {
             const selected = optionSelected(s)
+            const isBest = bestSeason !== undefined && s === bestSeason
             const tags = awardsBySeason[s] ?? []
             return (
               <li key={s} role="presentation">
@@ -221,11 +225,16 @@ export function SeasonSelectWithBadges({
                   type="button"
                   role="option"
                   aria-selected={selected}
-                  className={`w-full text-left px-2 py-1.5 flex items-center justify-between gap-2 hover:bg-surface-3 ${selected ? 'bg-surface-3/80' : ''}`}
+                  className={`w-full text-left px-2 py-1.5 flex items-center justify-between gap-2 hover:bg-surface-3 ${selected ? 'bg-surface-3/80' : ''} ${isBest ? 'bg-amber-950/30' : ''}`}
                   onClick={() => pick(s)}
                 >
                   <span className="truncate">{teamMap[s] ? `${s} · ${teamMap[s]}` : s}</span>
-                  <AwardIconRow tags={tags} className="shrink-0" />
+                  <span className="flex items-center gap-1.5 shrink-0">
+                    <AwardIconRow tags={tags} />
+                    {isBest && (
+                      <span className="text-[9px] font-bold uppercase tracking-wide text-amber-400 leading-none">best</span>
+                    )}
+                  </span>
                 </button>
               </li>
             )

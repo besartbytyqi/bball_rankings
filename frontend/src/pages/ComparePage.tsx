@@ -71,9 +71,10 @@ function CompareChartLegend({ maxHeight = 56, paddingTop }: { maxHeight?: number
 }
 
 const PLAYER_TAB_COLS = {
-  base: ['gp', 'min', 'pts', 'pts_per_min', 'reb', 'ast', 'stl', 'blk', 'fg_pct', 'fg3_pct', 'ft_pct', 'plus_minus'] as const,
+  base:    ['gp', 'min', 'pts', 'reb', 'ast', 'stl', 'blk', 'fg_pct', 'fg3_pct', 'ft_pct', 'plus_minus'] as const,
   advanced: ['gp', 'min', 'ts_pct', 'usg_pct', 'off_rating', 'def_rating', 'net_rating', 'ast_pct', 'oreb_pct', 'dreb_pct', 'reb_pct', 'pie'] as const,
   defense: ['gp', 'min', 'stl', 'blk', 'dreb', 'dreb_pct', 'def_rating', 'opp_pts_paint', 'opp_pts_2nd_chance', 'opp_pts_off_tov', 'def_ws'] as const,
+  per_min: ['gp', 'min', 'pts_per_min', 'reb_per_min', 'ast_per_min', 'stl_per_min', 'blk_per_min', 'tov_per_min'] as const,
 }
 const PLAYER_COMPARE_EXCLUDE_KEYS = new Set<string>([
   'player_id', 'PLAYER_ID', 'season', 'stat_type', 'id', 'extra_stats',
@@ -81,6 +82,7 @@ const PLAYER_COMPARE_EXCLUDE_KEYS = new Set<string>([
   ...PLAYER_TAB_COLS.base,
   ...PLAYER_TAB_COLS.advanced,
   ...PLAYER_TAB_COLS.defense,
+  ...PLAYER_TAB_COLS.per_min,
 ])
 const TEAM_COMPARE_TAB_KEYS: Record<'base' | 'advanced' | 'opponent', string[]> = {
   base: ['pts', 'reb', 'ast', 'stl', 'blk', 'fg_pct', 'fg3_pct', 'ft_pct'],
@@ -117,6 +119,7 @@ function CompareSeasonPicker({
   teamMap,
   showCurrentSeason = true,
   awardsBySeason,
+  bestSeason,
 }: {
   seasons: string[]
   value: string | undefined
@@ -124,6 +127,7 @@ function CompareSeasonPicker({
   teamMap: Record<string, string>
   showCurrentSeason?: boolean
   awardsBySeason?: Record<string, string[]>
+  bestSeason?: string
 }) {
   if (awardsBySeason !== undefined) {
     return (
@@ -135,6 +139,7 @@ function CompareSeasonPicker({
         showCurrentSeason={showCurrentSeason}
         currentLabel="Current season (app)"
         awardsBySeason={awardsBySeason}
+        bestSeason={bestSeason}
         variant="compare"
         aria-label="Season"
       />
@@ -185,7 +190,7 @@ function teamRowRadarStats(row: Record<string, unknown>): Record<string, number 
 // ---------------------------------------------------------------------------
 function PlayerCompare({ p1Id, p2Id }: { p1Id: number; p2Id: number }) {
   const [searchParams, setSearchParams] = useSearchParams()
-  const [statTab, setStatTab] = useState<'base' | 'advanced' | 'defense'>('base')
+  const [statTab, setStatTab] = useState<'base' | 'advanced' | 'defense' | 'per_min'>('base')
   const season1 = searchParams.get('s1') || undefined
   const season2 = searchParams.get('s2') || undefined
 
@@ -283,6 +288,28 @@ function PlayerCompare({ p1Id, p2Id }: { p1Id: number; p2Id: number }) {
     if (changed) setSearchParams(next, { replace: true })
   }, [retired1, retired2, lastSeason1, lastSeason2, searchParams, setSearchParams])
 
+  const bestSeason1 = useMemo(() => {
+    const rows = (career1 ?? []) as Record<string, unknown>[]
+    if (!rows.length) return undefined
+    return rows.reduce((best, r) => {
+      const score = (n: unknown) => Number(n ?? 0)
+      const s = score(r.pts) * 3 + score(r.reb) * 1.5 + score(r.ast) * 1.5 + score(r.stl) + score(r.blk)
+      const b = score(best.pts) * 3 + score(best.reb) * 1.5 + score(best.ast) * 1.5 + score(best.stl) + score(best.blk)
+      return s > b ? r : best
+    }, rows[0])?.season as string | undefined
+  }, [career1])
+
+  const bestSeason2 = useMemo(() => {
+    const rows = (career2 ?? []) as Record<string, unknown>[]
+    if (!rows.length) return undefined
+    return rows.reduce((best, r) => {
+      const score = (n: unknown) => Number(n ?? 0)
+      const s = score(r.pts) * 3 + score(r.reb) * 1.5 + score(r.ast) * 1.5 + score(r.stl) + score(r.blk)
+      const b = score(best.pts) * 3 + score(best.reb) * 1.5 + score(best.ast) * 1.5 + score(best.stl) + score(best.blk)
+      return s > b ? r : best
+    }, rows[0])?.season as string | undefined
+  }, [career2])
+
   const waitCareer1 = retired1 && !season1 && career1Pending
   const waitCareer2 = retired2 && !season2 && career2Pending
   const enabledP1 = !playersPending && !waitCareer1
@@ -303,18 +330,21 @@ function PlayerCompare({ p1Id, p2Id }: { p1Id: number; p2Id: number }) {
 
   const base1 = (s1?.base?.[0] ?? {}) as Record<string, number | null>
   const base2 = (s2?.base?.[0] ?? {}) as Record<string, number | null>
-  const addPPM = (r: Record<string, unknown>): Record<string, unknown> => {
-    const pts = Number(r.pts ?? 0); const min = Number(r.min ?? 0)
-    return { ...r, pts_per_min: min > 0 ? pts / min : null }
+  const addPerMinStats = (r: Record<string, unknown>): Record<string, unknown> => {
+    const min = Number(r.min ?? 0)
+    if (min <= 0) return r
+    const pm = (k: string) => { const v = Number(r[k] ?? 0); return v > 0 ? v / min : null }
+    return { ...r, pts_per_min: pm('pts'), reb_per_min: pm('reb'), ast_per_min: pm('ast'), stl_per_min: pm('stl'), blk_per_min: pm('blk'), tov_per_min: pm('tov') }
   }
-  const rowTab1 = addPPM((s1?.[statTab]?.[0] ?? {}) as Record<string, unknown>)
-  const rowTab2 = addPPM((s2?.[statTab]?.[0] ?? {}) as Record<string, unknown>)
+  const sourceTab = statTab === 'per_min' ? 'base' : statTab
+  const rowTab1 = addPerMinStats((s1?.[sourceTab]?.[0] ?? {}) as Record<string, unknown>)
+  const rowTab2 = addPerMinStats((s2?.[sourceTab]?.[0] ?? {}) as Record<string, unknown>)
   const name1 = pMeta1?.display_name ?? `Player ${p1Id}`
   const name2 = pMeta2?.display_name ?? `Player ${p2Id}`
   const label1 = compareSeasonLabel(name1, effectiveSeason1)
   const label2 = compareSeasonLabel(name2, effectiveSeason2)
 
-  const statKeys = [...PLAYER_TAB_COLS[statTab]]
+  const statKeys = [...PLAYER_TAB_COLS[statTab]] as string[]
   const radarEntities = [
     { id: p1Id, label: label1, stats: base1 as Record<string, number | null> },
     { id: p2Id, label: label2, stats: base2 as Record<string, number | null> },
@@ -352,6 +382,7 @@ function PlayerCompare({ p1Id, p2Id }: { p1Id: number; p2Id: number }) {
               teamMap={teamBySeason.p1}
               showCurrentSeason={!retired1}
               awardsBySeason={honors1?.by_season ?? {}}
+              bestSeason={bestSeason1}
             />
             {!retired1 && season1 ? (
               <button
@@ -373,6 +404,7 @@ function PlayerCompare({ p1Id, p2Id }: { p1Id: number; p2Id: number }) {
               teamMap={teamBySeason.p2}
               showCurrentSeason={!retired2}
               awardsBySeason={honors2?.by_season ?? {}}
+              bestSeason={bestSeason2}
             />
             {!retired2 && season2 ? (
               <button
@@ -393,7 +425,7 @@ function PlayerCompare({ p1Id, p2Id }: { p1Id: number; p2Id: number }) {
       </div>
 
       <div className="bg-surface-2 rounded-lg p-2 flex flex-wrap gap-2">
-        {(['base', 'advanced', 'defense'] as const).map((t) => (
+        {(['base', 'advanced', 'defense', 'per_min'] as const).map((t) => (
           <button
             key={t}
             type="button"
@@ -402,7 +434,7 @@ function PlayerCompare({ p1Id, p2Id }: { p1Id: number; p2Id: number }) {
               statTab === t ? 'bg-sky-600 border-sky-500 text-white' : 'bg-surface-3 border-border text-text-secondary hover:text-text-primary'
             }`}
           >
-            {t}
+            {t.replace('_', ' ')}
           </button>
         ))}
       </div>
@@ -468,7 +500,7 @@ function PlayerCompare({ p1Id, p2Id }: { p1Id: number; p2Id: number }) {
               const v1 = Number(rowTab1[k] ?? 0)
               const v2 = Number(rowTab2[k] ?? 0)
               const isPct = k.includes('pct')
-              const decimals = k === 'pts_per_min' ? 3 : 1
+              const decimals = k.endsWith('_per_min') ? 3 : 1
               const higherBetter = (a: number, b: number) => {
                 if (statTab === 'defense' && (k === 'def_rating' || k.includes('opp_'))) return a < b
                 return a > b

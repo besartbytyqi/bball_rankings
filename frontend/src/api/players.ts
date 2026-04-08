@@ -5,6 +5,10 @@ export const fetchAllPlayers = (opts?: { includeInactive?: boolean }) => {
   const q = opts?.includeInactive ? '?include_inactive=1' : ''
   return apiFetch<Player[]>(`/players${q}`)
 }
+
+export type BestSeasonPlayer = Player & { season: string; score: number }
+export const fetchPlayersBestSeason = (minGp = 20) =>
+  apiFetch<BestSeasonPlayer[]>(`/players/best-season?min_gp=${minGp}`)
 export const fetchFeaturedPlayers = () => apiFetch<Record<string, unknown>[]>('/players/featured')
 export const fetchFeaturedPlayerIds = () => apiFetch<number[]>('/players/featured/ids')
 export const addFeaturedPlayer = (id: number) =>

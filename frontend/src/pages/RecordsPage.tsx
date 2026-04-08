@@ -33,6 +33,7 @@ export default function RecordsPage() {
   const [category, setCategory] = useState('pts')
   const [scope, setScope] = useState('Career Totals')
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('All Time')
+  const [limit, setLimit] = useState(50)
 
   const { data: catalog } = useQuery({
     queryKey: ['records', 'catalog'],
@@ -55,9 +56,9 @@ export default function RecordsPage() {
   const activeCatalog = categories.find((c) => c.id === category)
 
   const { data: records, isLoading } = useQuery({
-    queryKey: ['records', category, scope, filter],
+    queryKey: ['records', category, scope, filter, limit],
     queryFn: (): Promise<RecordRow[]> =>
-      fetchRecords(category, scope === 'Career Totals' ? 'career' : 'season', filterToApi(filter)),
+      fetchRecords(category, scope === 'Career Totals' ? 'career' : 'season', filterToApi(filter), limit),
   })
 
   return (
@@ -100,6 +101,21 @@ export default function RecordsPage() {
                   className={`px-3 py-1.5 text-sm rounded transition-colors ${filter === f ? 'bg-nba-blue text-white' : 'bg-surface-3 text-text-secondary hover:text-text-primary'}`}
                 >
                   {f}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs text-text-secondary uppercase font-bold tracking-wider">Show</label>
+            <div className="flex gap-2">
+              {[25, 50, 100, 250, 500].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setLimit(n)}
+                  className={`px-3 py-1.5 text-sm rounded transition-colors ${limit === n ? 'bg-nba-gold text-black font-semibold' : 'bg-surface-3 text-text-secondary hover:text-text-primary'}`}
+                >
+                  {n}
                 </button>
               ))}
             </div>

@@ -4,11 +4,13 @@ import { useQuery } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   fetchAllPlayers,
+  fetchPlayersBestSeason,
   fetchFeaturedPlayers,
   fetchFeaturedPlayerIds,
   addFeaturedPlayer,
   removeFeaturedPlayer,
   reorderFeaturedPlayers,
+  type BestSeasonPlayer,
 } from '@/api/players'
 import { filterPlayersByName } from '@/utils/searchFilter'
 import PlayerAvatar from '@/components/ui/PlayerAvatar'
@@ -21,7 +23,11 @@ import { SortableFeaturedStrip, type SortableDragHandleProps } from '@/component
 import { StatHeader } from '@/components/ui/StatHeader'
 import type { Player } from '@/types'
 
-type SortKey = 'name' | 'pts' | 'reb' | 'ast' | 'stl' | 'blk' | 'fg_pct'
+type SortKey = 'name' | 'pts' | 'reb' | 'ast' | 'stl' | 'blk' | 'fg_pct' | 'ranking'
+
+function compositeScore(p: Player): number {
+  return (p.pts ?? 0) * 3 + (p.reb ?? 0) * 1.5 + (p.ast ?? 0) * 1.5 + (p.stl ?? 0) + (p.blk ?? 0)
+}
 
 function FeaturedPlayerCard({
   row,
@@ -77,6 +83,7 @@ function FeaturedPlayerCard({
 
 const SORT_OPTIONS: { label: string; key: SortKey }[] = [
   { label: 'Name', key: 'name' },
+  { label: 'Ranking', key: 'ranking' },
   { label: 'PPG', key: 'pts' },
   { label: 'RPG', key: 'reb' },
   { label: 'APG', key: 'ast' },
@@ -88,12 +95,19 @@ const SORT_OPTIONS: { label: string; key: SortKey }[] = [
 export default function PlayersPage() {
   const [query, setQuery] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('name')
+  const [allTime, setAllTime] = useState(false)
   const queryClient = useQueryClient()
 
   const { data: players, isLoading, isError, refetch } = useQuery({
     queryKey: ['players', 'all'],
     queryFn: () => fetchAllPlayers(),
     staleTime: 60 * 60 * 1000,
+  })
+  const { data: bestSeasonPlayers, isLoading: bsLoading } = useQuery({
+    queryKey: ['players', 'best-season'],
+    queryFn: () => fetchPlayersBestSeason(),
+    staleTime: 60 * 60 * 1000,
+    enabled: sortKey === 'ranking' && allTime,
   })
   const { data: featuredIds = [] } = useQuery({
     queryKey: ['featured', 'ids'],
@@ -110,16 +124,23 @@ export default function PlayersPage() {
   }
 
   const filtered = useMemo(() => {
+    if (sortKey === 'ranking' && allTime) {
+      const list = bestSeasonPlayers ?? []
+      return query ? list.filter((p) => p.display_name.toLowerCase().includes(query.toLowerCase())) : list
+    }
     let list = filterPlayersByName(players ?? [], query)
     if (sortKey === 'name') {
       list = [...list].sort((a, b) => a.display_name.localeCompare(b.display_name))
+    } else if (sortKey === 'ranking') {
+      list = [...list].sort((a, b) => compositeScore(b) - compositeScore(a))
     } else {
       list = [...list].sort((a, b) => ((b[sortKey] as number) ?? -Infinity) - ((a[sortKey] as number) ?? -Infinity))
     }
     return list
-  }, [players, query, sortKey])
+  }, [players, bestSeasonPlayers, query, sortKey, allTime])
 
   const showTable = sortKey !== 'name'
+  const showingAllTime = sortKey === 'ranking' && allTime
 
   return (
     <div>
@@ -134,9 +155,9 @@ export default function PlayersPage() {
           onChange={(e) => setQuery(e.target.value)}
           className="flex-1 min-w-48 max-w-xs bg-surface-2 border border-border rounded-lg px-4 py-2 text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-nba-red"
         />
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-text-secondary">Sort</span>
-          <div className="flex gap-1">
+          <div className="flex gap-1 flex-wrap">
             {SORT_OPTIONS.map(({ label, key }) => (
               <button
                 key={key}
@@ -149,23 +170,40 @@ export default function PlayersPage() {
               </button>
             ))}
           </div>
+          {sortKey === 'ranking' && (
+            <div className="flex gap-1 ml-2 border-l border-border pl-2">
+              <button
+                onClick={() => setAllTime(false)}
+                className={`px-2.5 py-1.5 text-xs rounded transition-colors ${!allTime ? 'bg-nba-blue text-white' : 'bg-surface-2 text-text-secondary hover:text-text-primary'}`}
+              >
+                This Season
+              </button>
+              <button
+                onClick={() => setAllTime(true)}
+                className={`px-2.5 py-1.5 text-xs rounded transition-colors ${allTime ? 'bg-nba-blue text-white' : 'bg-surface-2 text-text-secondary hover:text-text-primary'}`}
+              >
+                All Time
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Featured players strip */}
       {!query && sortKey === 'name' && <FeaturedStrip />}
 
-      {isLoading && <LoadingSpinner label="Loading players…" />}
+      {(isLoading || (showingAllTime && bsLoading)) && <LoadingSpinner label="Loading players…" />}
       {isError && <ErrorCard onRetry={refetch} />}
 
-      {!isLoading && !isError && (
+      {!isLoading && !isError && !(showingAllTime && bsLoading) && (
         <div>
           <p className="text-xs text-text-secondary mb-3">
             {filtered.length} players{query && ` matching "${query}"`}
+            {showingAllTime && <span className="ml-2 text-nba-blue font-medium">· All Time (best season, min 20 GP)</span>}
           </p>
 
           {showTable ? (
-            <PlayerTable players={filtered} sortKey={sortKey} featuredIds={featuredIds as number[]} onToggleFeatured={toggleFeatured} />
+            <PlayerTable players={filtered as Player[]} sortKey={sortKey} allTime={showingAllTime} featuredIds={featuredIds as number[]} onToggleFeatured={toggleFeatured} />
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
               {filtered.map((p) => (
@@ -179,12 +217,14 @@ export default function PlayersPage() {
   )
 }
 
-function PlayerTable({ players, sortKey, featuredIds, onToggleFeatured }: { players: Player[]; sortKey: SortKey; featuredIds: number[]; onToggleFeatured: (e: React.MouseEvent, id: number) => void }) {
+function PlayerTable({ players, sortKey, allTime = false, featuredIds, onToggleFeatured }: { players: Player[]; sortKey: SortKey; allTime?: boolean; featuredIds: number[]; onToggleFeatured: (e: React.MouseEvent, id: number) => void }) {
   const cols: { label: string; key: SortKey; statCol: string; fmt: (p: Player) => string }[] = [
     { label: 'Player', key: 'name', statCol: 'display_name', fmt: (p) => p.display_name },
     { label: 'Team', key: 'name', statCol: 'team', fmt: (p) => p.team_abbreviation ?? '—' },
     { label: 'Pos', key: 'name', statCol: 'position', fmt: (p) => p.position ?? '—' },
+    ...(allTime ? [{ label: 'Season', key: 'name' as SortKey, statCol: 'season', fmt: (p: Player) => (p as BestSeasonPlayer).season ?? '—' }] : []),
     { label: 'GP', key: 'name', statCol: 'gp', fmt: (p) => p.gp != null ? String(p.gp) : '—' },
+    ...(sortKey === 'ranking' ? [{ label: 'Score', key: 'ranking' as SortKey, statCol: 'ranking', fmt: (p: Player) => fmtStat(compositeScore(p), 1) }] : []),
     { label: 'PPG', key: 'pts', statCol: 'pts', fmt: (p) => fmtStat(p.pts) },
     { label: 'RPG', key: 'reb', statCol: 'reb', fmt: (p) => fmtStat(p.reb) },
     { label: 'APG', key: 'ast', statCol: 'ast', fmt: (p) => fmtStat(p.ast) },

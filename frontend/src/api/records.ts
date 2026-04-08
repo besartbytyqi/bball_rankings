@@ -10,8 +10,8 @@ export type RecordCatalogEntry = {
   notes?: string
 }
 
-export const fetchRecords = async (category: string, scope: string, filter: string): Promise<RecordRow[]> => {
-  const { data } = await client.get<RecordRow[]>(`/records?category=${category}&scope=${scope}&filter=${filter}`)
+export const fetchRecords = async (category: string, scope: string, filter: string, limit: number = 50): Promise<RecordRow[]> => {
+  const { data } = await client.get<RecordRow[]>(`/records?category=${category}&scope=${scope}&filter=${filter}&limit=${limit}`)
   return data
 }
 

@@ -19,17 +19,19 @@ import DataCoverageNotice from '@/components/DataCoverageNotice'
 import { SeasonSelectWithBadges } from '@/components/ui/SeasonSelectWithBadges'
 import { AdditionalLocalStats } from '@/components/AdditionalLocalStats'
 
-const STAT_TABS = ['Base', 'Advanced', 'Defense']
+const STAT_TABS = ['Base', 'Advanced', 'Defense', 'Per Min']
 const PROFILE_TABS = ['Season Stats', 'Game Log', 'Splits', 'Career']
 
-const BASE_COLS = ['gp','min','pts','pts_per_min','reb','ast','stl','blk','fg_pct','fg3_pct','ft_pct','plus_minus']
-const ADV_COLS  = ['gp','min','ts_pct','usg_pct','off_rating','def_rating','net_rating','ast_pct','oreb_pct','dreb_pct','reb_pct','pie']
-const DEF_COLS  = ['gp','min','stl','blk','dreb','dreb_pct','def_rating','opp_pts_paint','opp_pts_2nd_chance','opp_pts_off_tov','def_ws']
+const BASE_COLS    = ['gp','min','pts','reb','ast','stl','blk','fg_pct','fg3_pct','ft_pct','plus_minus']
+const ADV_COLS     = ['gp','min','ts_pct','usg_pct','off_rating','def_rating','net_rating','ast_pct','oreb_pct','dreb_pct','reb_pct','pie']
+const DEF_COLS     = ['gp','min','stl','blk','dreb','dreb_pct','def_rating','opp_pts_paint','opp_pts_2nd_chance','opp_pts_off_tov','def_ws']
+const PER_MIN_COLS = ['gp','min','pts_per_min','reb_per_min','ast_per_min','stl_per_min','blk_per_min','tov_per_min']
 
 const PLAYER_STAT_EXTRA_EXCLUDE = new Set([
   ...BASE_COLS,
   ...ADV_COLS,
   ...DEF_COLS,
+  ...PER_MIN_COLS,
   'id',
   'player_id',
   'season',
@@ -38,11 +40,20 @@ const PLAYER_STAT_EXTRA_EXCLUDE = new Set([
   'extra_stats',
 ])
 
-function withPtsPerMin(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+function withPerMinStats(rows: Record<string, unknown>[]): Record<string, unknown>[] {
   return rows.map((r) => {
-    const pts = Number(r.pts ?? 0)
     const min = Number(r.min ?? 0)
-    return { ...r, pts_per_min: min > 0 ? pts / min : null }
+    if (min <= 0) return r
+    const perMin = (key: string) => { const v = Number(r[key] ?? 0); return v > 0 ? v / min : null }
+    return {
+      ...r,
+      pts_per_min: perMin('pts'),
+      reb_per_min: perMin('reb'),
+      ast_per_min: perMin('ast'),
+      stl_per_min: perMin('stl'),
+      blk_per_min: perMin('blk'),
+      tov_per_min: perMin('tov'),
+    }
   })
 }
 
@@ -85,7 +96,7 @@ function StatTable({ rows, cols }: { rows: Record<string, unknown>[]; cols: stri
                 const isMax = typeof val === 'number' && colMaxes[c] !== undefined && val === colMaxes[c]
                 return (
                   <td key={c} className={`py-1.5 px-2 text-right first:text-left tabular-nums ${isMax ? 'text-nba-gold font-semibold' : ''}`}>
-                    {val == null ? '—' : typeof val === 'string' ? val : isPct ? fmtPct(val as number) : fmtStat(val as number, c === 'pts_per_min' ? 3 : 1)}
+                    {val == null ? '—' : typeof val === 'string' ? val : isPct ? fmtPct(val as number) : fmtStat(val as number, c.endsWith('_per_min') ? 3 : 1)}
                   </td>
                 )
               })}
@@ -530,15 +541,15 @@ export default function PlayerProfilePage() {
           )}
           {showAllSeasons ? (
             <StatTable
-              rows={withPtsPerMin([...(career as Record<string, unknown>[] ?? [])].reverse())}
+              rows={withPerMinStats([...(career as Record<string, unknown>[] ?? [])].reverse())}
               cols={['season', ...BASE_COLS]}
             />
           ) : statsLoading ? <LoadingSpinner /> : (
             <>
               <Tabs tabs={STAT_TABS} active={statTab} onChange={setStatTab} />
               <StatTable
-                rows={withPtsPerMin((statTab === 'Base' ? stats?.base : statTab === 'Advanced' ? stats?.advanced : stats?.defense) as Record<string, unknown>[] ?? [])}
-                cols={statTab === 'Base' ? BASE_COLS : statTab === 'Advanced' ? ADV_COLS : DEF_COLS}
+                rows={withPerMinStats((statTab === 'Base' ? stats?.base : statTab === 'Advanced' ? stats?.advanced : statTab === 'Defense' ? stats?.defense : stats?.base) as Record<string, unknown>[] ?? [])}
+                cols={statTab === 'Base' ? BASE_COLS : statTab === 'Advanced' ? ADV_COLS : statTab === 'Defense' ? DEF_COLS : PER_MIN_COLS}
               />
               <AdditionalLocalStats row={primaryStatRow} excludeKeys={PLAYER_STAT_EXTRA_EXCLUDE} />
             </>
@@ -569,7 +580,7 @@ export default function PlayerProfilePage() {
               </div>
               <div>
                 <SectionHeader title="Season-by-Season" />
-                <StatTable rows={withPtsPerMin((career ?? []) as Record<string, unknown>[])} cols={['season','gp','min','pts','pts_per_min','reb','ast','stl','blk','fg_pct','fg3_pct','ft_pct']} />
+                <StatTable rows={withPerMinStats((career ?? []) as Record<string, unknown>[])} cols={['season','gp','min','pts','reb','ast','stl','blk','fg_pct','fg3_pct','ft_pct']} />
               </div>
             </>
           )}

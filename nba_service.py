@@ -1349,7 +1349,7 @@ def get_records_catalog() -> list[dict[str, Any]]:
     return list(RECORDS_CATALOG)
 
 
-def get_records(category: str = "pts", scope: str = "career", filter_type: str = "all") -> list[dict]:
+def get_records(category: str = "pts", scope: str = "career", filter_type: str = "all", limit: int = 50) -> list[dict]:
     """
     Leaders per category. Per-game counting stats use SUM(per_game * gp) for career totals.
     Shooting categories require min GP; career shooting uses best qualified season.
@@ -1399,7 +1399,7 @@ def get_records(category: str = "pts", scope: str = "career", filter_type: str =
                 )
                 WHERE best_val IS NOT NULL
                 ORDER BY best_val DESC
-                LIMIT 50
+                LIMIT {limit}
             """
             rows = _db.fetchall(sql)
             rd = 3 if category == "pie" else 4
@@ -1420,7 +1420,7 @@ def get_records(category: str = "pts", scope: str = "career", filter_type: str =
             {adv_where_clause}
               AND {extra_ok}
             ORDER BY val DESC
-            LIMIT 50
+            LIMIT {limit}
         """
         rows = _db.fetchall(sql)
         rd = 3 if category == "pie" else 4
@@ -1447,7 +1447,7 @@ def get_records(category: str = "pts", scope: str = "career", filter_type: str =
                 {rate_clause}
                 GROUP BY p.player_id
                 ORDER BY best_pct DESC
-                LIMIT 50
+                LIMIT {limit}
             """
             rows = _db.fetchall(sql)
             return [
@@ -1466,7 +1466,7 @@ def get_records(category: str = "pts", scope: str = "career", filter_type: str =
             JOIN players p ON p.player_id = s.player_id
             {rate_clause}
             ORDER BY val DESC
-            LIMIT 50
+            LIMIT {limit}
         """
         rows = _db.fetchall(sql)
         return [
@@ -1491,7 +1491,7 @@ def get_records(category: str = "pts", scope: str = "career", filter_type: str =
                 {where_clause}
                 GROUP BY p.player_id
                 ORDER BY total_val DESC
-                LIMIT 50
+                LIMIT {limit}
             """
             rows = _db.fetchall(sql)
             return [
@@ -1510,7 +1510,7 @@ def get_records(category: str = "pts", scope: str = "career", filter_type: str =
             JOIN players p ON p.player_id = s.player_id
             {min_season_clause}
             ORDER BY val DESC
-            LIMIT 50
+            LIMIT {limit}
         """
         rows = _db.fetchall(sql)
         return [
@@ -1535,7 +1535,7 @@ def get_records(category: str = "pts", scope: str = "career", filter_type: str =
                 {where_clause}
                 GROUP BY p.player_id
                 ORDER BY total_val DESC
-                LIMIT 50
+                LIMIT {limit}
             """
         else:
             sql = f"""
@@ -1546,7 +1546,7 @@ def get_records(category: str = "pts", scope: str = "career", filter_type: str =
                 {where_clause}
                 GROUP BY p.player_id
                 ORDER BY total_val DESC
-                LIMIT 50
+                LIMIT {limit}
             """
         rows = _db.fetchall(sql)
         rd = 0 if category == "gp" else 1
@@ -1567,7 +1567,7 @@ def get_records(category: str = "pts", scope: str = "career", filter_type: str =
         JOIN players p ON p.player_id = s.player_id
         {where_clause}
         ORDER BY val DESC
-        LIMIT 50
+        LIMIT {limit}
     """
     rows = _db.fetchall(sql)
     return [
@@ -1618,8 +1618,58 @@ def get_all_players(include_inactive: bool = False) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# All-time best season ranking
+# ---------------------------------------------------------------------------
+def get_all_players_best_season(min_gp: int = 20) -> list[dict]:
+    """Return each player's best season by composite score (pts*3 + reb*1.5 + ast*1.5 + stl + blk)."""
+    cache_key = f"allplayers_best_season_{min_gp}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    rows = _db.fetchall(
+        f"""
+        SELECT p.player_id, p.display_name, p.team_abbreviation, p.position, p.is_active,
+               s.season, s.gp, s.pts, s.reb, s.ast, s.stl, s.blk, s.fg_pct,
+               (s.pts * 3 + s.reb * 1.5 + s.ast * 1.5 + s.stl + s.blk) AS score
+        FROM player_season_stats s
+        JOIN players p ON p.player_id = s.player_id
+        WHERE s.stat_type = 'base' AND s.gp >= {min_gp}
+          AND (s.pts * 3 + s.reb * 1.5 + s.ast * 1.5 + s.stl + s.blk) = (
+              SELECT MAX(s2.pts * 3 + s2.reb * 1.5 + s2.ast * 1.5 + s2.stl + s2.blk)
+              FROM player_season_stats s2
+              WHERE s2.player_id = s.player_id AND s2.stat_type = 'base' AND s2.gp >= {min_gp}
+          )
+        ORDER BY score DESC
+        """,
+    )
+    _cache_set(cache_key, rows)
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # Player career history (all seasons)
 # ---------------------------------------------------------------------------
+def _merge_ts_pct(rows: list[dict], ts_lookup: dict[tuple[int, str], float]) -> list[dict]:
+    """Merge ts_pct into base stat rows from a lookup keyed by (player_id, season)."""
+    result = []
+    for r in rows:
+        pid = int(r.get("player_id", 0))
+        season = str(r.get("season", ""))
+        ts = ts_lookup.get((pid, season))
+        if ts is not None:
+            r = {**r, "ts_pct": ts}
+        elif not r.get("ts_pct") and r.get("fga") and r.get("pts"):
+            fga = float(r["fga"])
+            fta = float(r.get("fta") or 0)
+            pts = float(r["pts"])
+            denom = 2.0 * (fga + 0.44 * fta)
+            if denom > 0:
+                r = {**r, "ts_pct": round(pts / denom, 3)}
+        result.append(r)
+    return result
+
+
 def get_player_career(player_id: int) -> list[dict]:
     key = f"player_career_{player_id}"
     cached = _cache_get(key)
@@ -1634,13 +1684,20 @@ def get_player_career(player_id: int) -> list[dict]:
         (player_id,),
     )
     if rows:
-        # Merge extra_stats JSON into each row
+        adv = _db.fetchall(
+            """SELECT season, json_extract(extra_stats, '$.TS_PCT') AS ts_pct
+               FROM player_season_stats
+               WHERE player_id = ? AND stat_type = 'advanced'""",
+            (player_id,),
+        )
+        ts_lookup = {(player_id, str(r["season"])): float(r["ts_pct"]) for r in adv if r.get("ts_pct") is not None}
         result = []
         for r in rows:
             if r.get("extra_stats"):
                 extra = {k.lower(): v for k, v in json.loads(r["extra_stats"]).items()}
                 r = {**r, **extra}
             result.append(r)
+        result = _merge_ts_pct(result, ts_lookup)
         _cache_set(key, result)
         return result
 
@@ -1743,6 +1800,16 @@ def get_players_careers_batch(player_ids: list[int]) -> dict[str, Any]:
            ORDER BY player_id, season""",
         tuple(ids),
     )
+    adv_rows = _db.fetchall(
+        f"""SELECT player_id, season, json_extract(extra_stats, '$.TS_PCT') AS ts_pct
+           FROM player_season_stats
+           WHERE player_id IN ({placeholders}) AND stat_type = 'advanced'""",
+        tuple(ids),
+    )
+    ts_lookup: dict[tuple[int, str], float] = {
+        (int(r["player_id"]), str(r["season"])): float(r["ts_pct"])
+        for r in adv_rows if r.get("ts_pct") is not None
+    }
     by_pid: dict[int, list[dict]] = {pid: [] for pid in ids}
     found: set[int] = set()
     for r in rows:
@@ -1756,10 +1823,11 @@ def get_players_careers_batch(player_ids: list[int]) -> dict[str, Any]:
             except Exception:
                 pass
         by_pid[pid].append(row)
+    merged: dict[int, list[dict]] = {pid: _merge_ts_pct(rows_list, ts_lookup) for pid, rows_list in by_pid.items()}
     out: dict[str, list[dict]] = {}
     for pid in ids:
         if pid in found:
-            out[str(pid)] = by_pid[pid]
+            out[str(pid)] = merged[pid]
         else:
             out[str(pid)] = get_player_career(pid)
     return {"careers": out}

@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueries } from '@tanstack/react-query'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, ResponsiveContainer } from 'recharts'
 import { fetchAllPlayers, fetchPlayerCareersBatch, fetchPlayerSeasonAwards } from '@/api/players'
 import { EntitySelector } from '@/components/ui/EntitySelector'
 import { StatHeader } from '@/components/ui/StatHeader'
+import { SeasonSelectWithBadges } from '@/components/ui/SeasonSelectWithBadges'
 import { fmtPct, fmtStat } from '@/utils/formatters'
 import { STAT_DEFS } from '@/utils/statDefs'
 
@@ -125,9 +126,9 @@ function decodeRoster(raw: string | null, allPlayers: { player_id: number; displ
     .slice(0, 5)
 }
 
-// Weighted score: pts×3, reb×1.5, ast×1.5, stl×1, blk×1, tov×−2, ts%×2
+// Weighted score: pts×3, reb×1.5, ast×1.5, stl×1, blk×1 (matches Players page ranking formula)
 function teamScore(t: ProfileAgg): number {
-  return t.pts * 3 + t.reb * 1.5 + t.ast * 1.5 + t.stl + t.blk - t.tov * 2 + t.ts_pct * 200
+  return t.pts * 3 + t.reb * 1.5 + t.ast * 1.5 + t.stl + t.blk
 }
 
 function WinnerVerdict({
@@ -175,8 +176,6 @@ export default function DreamTeamPage() {
   const [teamA, setTeamA] = useState<PlayerSlot[]>([])
   const [teamB, setTeamB] = useState<PlayerSlot[]>([])
   const [chartMotion, setChartMotion] = useState(true)
-  const [openDropdown, setOpenDropdown] = useState<string | null>(null)
-  const dropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -222,16 +221,6 @@ export default function DreamTeamPage() {
     })
     return m
   }, [allIds, awardsResults])
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setOpenDropdown(null)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
 
   // Decode URL params once on mount (allPlayers may be empty yet — names get backfilled below)
   useEffect(() => {
@@ -316,7 +305,7 @@ export default function DreamTeamPage() {
     if (!id) return
     const set = team === 'A' ? setTeamA : setTeamB
     const current = team === 'A' ? teamA : teamB
-    if (current.length >= 5) return
+    if (current.length >= 15) return
     if (current.some((p) => p.id === id)) return
     const fallbackName = allPlayers.find((p) => p.player_id === id)?.display_name ?? `Player ${id}`
     set([...current, { id, name: name ?? fallbackName, season: CURRENT_SEASON }])
@@ -338,10 +327,8 @@ export default function DreamTeamPage() {
       const seasons = getPlayerSeasons(p.id)
       const bestSeason = getBestSeason(p.id)
       const playerAwards = awardsMap[p.id] ?? {}
-      const dropKey = `${team}-${p.id}`
-      const isOpen = openDropdown === dropKey
-      const seasonIcons = (s: string) =>
-        (playerAwards[s] ?? []).map((tag) => AWARD_ICONS[tag]).filter(Boolean).join('')
+      const careerRows = (careerMap[p.id] ?? []) as Record<string, unknown>[]
+      const teamMap = Object.fromEntries(careerRows.map((r) => [String(r.season ?? ''), String(r.team_abbreviation ?? '')]).filter(([s]) => s))
 
       return (
         <div
@@ -351,53 +338,18 @@ export default function DreamTeamPage() {
           <span className="font-medium text-sm flex-1 min-w-0 truncate">{p.name}</span>
 
           {seasons.length > 0 ? (
-            <div className="relative shrink-0" ref={isOpen ? dropdownRef : undefined}>
-              <button
-                type="button"
-                onClick={() => setOpenDropdown(isOpen ? null : dropKey)}
-                className="flex items-center gap-1 bg-surface-2 border border-border rounded px-2 py-0.5 text-xs text-text-primary hover:border-border/80 transition-colors"
-              >
-                <span className="font-mono">{p.season}</span>
-                {seasonIcons(p.season) && (
-                  <span className="text-[11px] leading-none">{seasonIcons(p.season)}</span>
-                )}
-                <svg className="w-3 h-3 text-text-secondary ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-
-              {isOpen && (
-                <div className="absolute right-0 top-full mt-1 z-50 bg-surface-2 border border-border rounded-lg shadow-xl overflow-hidden min-w-[148px] max-h-64 overflow-y-auto">
-                  {seasons.map((s) => {
-                    const icons = seasonIcons(s)
-                    const isBest = s === bestSeason
-                    const isSelected = s === p.season
-                    return (
-                      <button
-                        key={s}
-                        type="button"
-                        onClick={() => {
-                          setPlayerSeason(team, p.id, s)
-                          setOpenDropdown(null)
-                        }}
-                        className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 text-xs hover:bg-surface-3 transition-colors ${
-                          isSelected ? 'text-text-primary font-semibold' : 'text-text-secondary'
-                        } ${isBest ? 'bg-amber-950/30' : ''}`}
-                      >
-                        <span className="font-mono">{s}</span>
-                        <span className="flex items-center gap-1 shrink-0">
-                          {icons && <span className="text-[11px] leading-none">{icons}</span>}
-                          {isBest && (
-                            <span className="text-[9px] font-bold uppercase tracking-wide text-amber-400 leading-none">
-                              best
-                            </span>
-                          )}
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
+            <div className="shrink-0">
+              <SeasonSelectWithBadges
+                seasons={seasons}
+                value={p.season}
+                onChange={(s) => s && setPlayerSeason(team, p.id, s)}
+                teamMap={teamMap}
+                showCurrentSeason={false}
+                awardsBySeason={playerAwards}
+                bestSeason={bestSeason}
+                variant="compare"
+                aria-label="Season"
+              />
             </div>
           ) : (
             <span className="text-xs text-text-secondary shrink-0 font-mono">{p.season || '—'}</span>
@@ -424,7 +376,7 @@ export default function DreamTeamPage() {
         <div>
           <h1 className="text-2xl font-bold">Dream Team Builder</h1>
           <p className="text-text-secondary text-sm">
-            Build two 5-man rosters and compare combined per-game stats. Pick a season per player — best season is highlighted in the dropdown.
+            Build two rosters (up to 15 players each) and compare combined per-game stats. Pick a season per player — best season is highlighted in the dropdown.
           </p>
         </div>
       </div>
@@ -449,7 +401,7 @@ export default function DreamTeamPage() {
           <div className="flex items-center gap-3 border-b border-border pb-4">
             <div className="w-3 h-3 rounded-full bg-nba-blue shadow-[0_0_8px_rgba(23,64,139,0.6)]" />
             <h2 className="font-bold text-lg uppercase tracking-tight">Team Alpha</h2>
-            <span className="ml-auto text-xs text-text-secondary font-mono">{teamA.length}/5</span>
+            <span className="ml-auto text-xs text-text-secondary font-mono">{teamA.length}/15</span>
           </div>
 
           <div className="space-y-3 min-h-[200px]">
@@ -459,7 +411,7 @@ export default function DreamTeamPage() {
             )}
           </div>
 
-          {teamA.length < 5 && (
+          {teamA.length < 15 && (
             <EntitySelector type="player" label="Add Player" includeInactive onSelect={(id, name) => addPlayer('A', id, name)} />
           )}
         </div>
@@ -468,7 +420,7 @@ export default function DreamTeamPage() {
           <div className="flex items-center gap-3 border-b border-border pb-4">
             <div className="w-3 h-3 rounded-full bg-nba-red shadow-[0_0_8px_rgba(201,8,42,0.6)]" />
             <h2 className="font-bold text-lg uppercase tracking-tight">Team Omega</h2>
-            <span className="ml-auto text-xs text-text-secondary font-mono">{teamB.length}/5</span>
+            <span className="ml-auto text-xs text-text-secondary font-mono">{teamB.length}/15</span>
           </div>
 
           <div className="space-y-3 min-h-[200px]">
@@ -478,7 +430,7 @@ export default function DreamTeamPage() {
             )}
           </div>
 
-          {teamB.length < 5 && (
+          {teamB.length < 15 && (
             <EntitySelector type="player" label="Add Player" includeInactive onSelect={(id, name) => addPlayer('B', id, name)} />
           )}
         </div>

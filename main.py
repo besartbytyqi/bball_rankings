@@ -73,9 +73,10 @@ def leaders_overall():
 def records(
     category: str = Query(default="pts"),
     scope: str = Query(default="career"),
-    filter: str = Query(default="all")
+    filter: str = Query(default="all"),
+    limit: int = Query(default=50, ge=10, le=500),
 ):
-    return svc.get_records(category, scope, filter)
+    return svc.get_records(category, scope, filter, limit)
 
 
 @app.get("/api/records/catalog")
@@ -221,6 +222,11 @@ def team_splits(team_id: int):
 @app.get("/api/players")
 def players(include_inactive: bool = Query(False)):
     return svc.get_all_players(include_inactive=include_inactive)
+
+
+@app.get("/api/players/best-season")
+def players_best_season(min_gp: int = Query(default=20, ge=1, le=82)):
+    return svc.get_all_players_best_season(min_gp=min_gp)
 
 
 @app.get("/api/players/featured")

@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+frontend/node_modules/
+frontend/dist/
+.DS_Store
+*.local
+Screenshot*.png
+.dual-graph/
+.env
+.env.*
+!.env.example
+# nba_stats.db intentionally NOT excluded — baked into image so no live seeding needed
